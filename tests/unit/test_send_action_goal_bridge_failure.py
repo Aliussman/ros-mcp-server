@@ -57,16 +57,29 @@ class ResultSocket:
 
 
 @pytest.mark.parametrize(
-    "bridge_result,status,values,expected_success",
+    "bridge_result,status,values,expected_success,expected_status_text,expected_error",
     [
-        (False, 0, "synthetic action client failure", False),
-        (True, 4, {"marker": "succeeded"}, True),
-        (True, 6, {"marker": "aborted"}, True),
+        (
+            False,
+            0,
+            "synthetic action client failure",
+            False,
+            "STATUS_UNKNOWN",
+            "synthetic action client failure",
+        ),
+        (True, 4, {"marker": "succeeded"}, True, "STATUS_SUCCEEDED", None),
+        (True, 6, {"marker": "aborted"}, True, "STATUS_ABORTED", None),
     ],
     ids=["bridge-failure", "succeeded-control", "aborted-status-control"],
 )
 def test_action_result_preserves_bridge_failure_and_ros_status(
-    monkeypatch, bridge_result, status, values, expected_success
+    monkeypatch,
+    bridge_result,
+    status,
+    values,
+    expected_success,
+    expected_status_text,
+    expected_error,
 ):
     socket = ResultSocket(bridge_result, status, values)
     monkeypatch.setattr(transport.websocket, "create_connection", lambda *_a, **_k: socket)
@@ -82,7 +95,12 @@ def test_action_result_preserves_bridge_failure_and_ros_status(
     assert result["goal_id"] == socket.sent[0]["id"] == socket.received[0]["id"]
     assert result["action"] == socket.received[0]["action"]
     assert result["status"] == status
+    assert result["status_text"] == expected_status_text
     assert result["result"] == values
+    if expected_error is not None:
+        assert result["error"] == expected_error
+    else:
+        assert "error" not in result
     assert len(socket.sent) == 1
     assert socket.close_count == 1
     assert manager.ws is None

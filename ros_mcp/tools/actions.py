@@ -18,6 +18,16 @@ _ACTION_PARTS = {
     "feedback": ("action_feedback_details", "ActionFeedbackDetails"),
 }
 
+_GOAL_STATUS_MAP = {
+    0: "STATUS_UNKNOWN",
+    1: "STATUS_ACCEPTED",
+    2: "STATUS_EXECUTING",
+    3: "STATUS_CANCELING",
+    4: "STATUS_SUCCEEDED",
+    5: "STATUS_CANCELED",
+    6: "STATUS_ABORTED",
+}
+
 
 def _parse_typedef(typedef: dict) -> dict:
     """Parse a rosapi typedef into a field-name -> type mapping.
@@ -225,15 +235,7 @@ def register_action_tools(
         status_topic = f"{action_name}/_action/status"
         status_msg_type = "action_msgs/msg/GoalStatusArray"
 
-        status_map = {
-            0: "STATUS_UNKNOWN",
-            1: "STATUS_ACCEPTED",
-            2: "STATUS_EXECUTING",
-            3: "STATUS_CANCELING",
-            4: "STATUS_SUCCEEDED",
-            5: "STATUS_CANCELED",
-            6: "STATUS_ABORTED",
-        }
+        status_map = _GOAL_STATUS_MAP
 
         try:
             with ws_manager:
@@ -310,7 +312,7 @@ def register_action_tools(
         description=(
             "Send a goal to a ROS action server. Works only with ROS 2.\n"
             "Example:\nsend_action_goal('/turtle1/rotate_absolute', 'turtlesim/action/RotateAbsolute', {'theta': 1.57})\n"
-            "success reflects the rosbridge result flag; inspect status for the ROS goal outcome."
+            "success reflects the rosbridge result flag; inspect status and status_text for the ROS goal outcome."
         ),
         annotations=ToolAnnotations(
             title="Send Action Goal",
@@ -334,9 +336,10 @@ def register_action_tools(
             timeout (float): Timeout for action completion in seconds. If None, uses ws_manager.default_timeout.
 
         Returns:
-            dict: Contains action response including goal_id, status, and result.
+            dict: Contains action response including goal_id, status, status_text, and result.
                 success is true only when rosbridge reports result=true. The ROS
-                goal outcome is reported separately in status.
+                goal outcome is reported separately in status and status_text. If
+                rosbridge reports a failure, error contains the failure reason.
         """
         if not action_name or not action_name.strip():
             return {"error": "Action name cannot be empty"}
@@ -395,14 +398,21 @@ def register_action_tools(
                             )
                         except Exception:
                             pass
-                    return {
+                    is_success = msg_data.get("result") is True
+                    status = msg_data.get("status", "unknown")
+                    values = msg_data.get("values", {})
+                    response = {
                         "action": action_name,
                         "action_type": action_type,
-                        "success": msg_data.get("result") is True,
+                        "success": is_success,
                         "goal_id": goal_id,
-                        "status": msg_data.get("status", "unknown"),
-                        "result": msg_data.get("values", {}),
+                        "status": status,
+                        "status_text": _GOAL_STATUS_MAP.get(status, "UNKNOWN"),
+                        "result": values,
                     }
+                    if not is_success:
+                        response["error"] = values if isinstance(values, str) else str(values)
+                    return response
 
                 if msg_data.get("op") == "action_feedback":
                     feedback_count += 1
